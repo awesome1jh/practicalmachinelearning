@@ -1,0 +1,19 @@
+---
+title: "Practical Machine Learning Project"
+author: "J. Hartsfield"
+date: "December 10, 2015"
+output: html_document
+---
+
+This is the beginning of my summary.  The document should contain no more than 5 figures and 2000 words.
+```{r}
+summary(cars)
+```
+
+You can also embed plots, for example:
+
+```{r, echo=FALSE}
+plot(cars)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
