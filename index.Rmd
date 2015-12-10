@@ -2,7 +2,10 @@
 title: "Practical Machine Learning Project"
 author: "J. Hartsfield"
 date: "December 10, 2015"
-output: html_document
+output: 
+  html_document: 
+    fig_caption: yes
+    keep_md: yes
 ---
 
 This is the beginning of my summary.  The document should contain no more than 5 figures and 2000 words.
