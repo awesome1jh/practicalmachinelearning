@@ -13,13 +13,14 @@ More information is available from the website here: http://groupware.les.inf.pu
 
 ## Load and pre-process data
 
-We load the libraries we need and download the datasets from the internet.  After reading in the datasets, we eliminate the first 7 columns since they are not applicable to predicting the result. We also eliminate all columns that are mostly NA or empty. We then scale all columns except the last one ( classe which is what we want to predict).
+We load the libraries we need and download the datasets from the internet.  After reading in the datasets, we eliminate the first 7 columns since they are not applicable to predicting the result. We also eliminate all columns that are mostly NA or empty. 
 
 We analyze the covariates to see if we any have near zero variance.  They do not, so there is no need to remove columns on that basis. We then divide the training set into 4 folds (mutually exclusive random subsets of the observations).  Each fold is then divided into a training dataset and a testing dataset. 
-```{r libraryAndDataLoad,  echo=FALSE, message=FALSE, warning=FALSE, cache=TRUE}
+```{r libraryAndDataLoad, include=FALSE, message=FALSE, warning=FALSE, cache=TRUE}
 library(caret)
 library(randomForest)
 library(rattle)
+library(rpart.plot)
 # library(gbm)
 
 url_training <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
@@ -45,9 +46,6 @@ testingAll <- testingAll[,-c(wntg)]
 # check to see if there are any zero covariates
 nsv <- nearZeroVar(trainingAll,saveMetrics=TRUE)
 nsv
-# scale the data in the training and testing datasets
-trainingAll[,-53] <- scale(trainingAll[,-53])
-testingAll[,-53] <- scale(testingAll[,-53])
 
 # split training data into 4 randomly sampled datasets
 set.seed(1234)
@@ -76,7 +74,9 @@ training <- trainingAll[inTrain,]; testing <- trainingAll[-inTrain,]
 
 ## Examine different methods to check effectiveness
 
-First, we predict with trees on the first training set (training1) and look at the tree plot.  
+### Classification Tree
+
+We use classification tree to predict with trees on the first training set (training1) and look at the tree plot.  
 
 ```{r tree, echo=FALSE, message=FALSE,warning=FALSE,cache=TRUE}
 treeFit <- train(classe ~., method="rpart", data=training1)
@@ -89,25 +89,33 @@ table(treePredict,testing1$classe)
 
 We see that this method only gave us a `r 100*cmTree$overall[1]`% overall accuracy.
 
+### Random Forest
+
+Again we pre-process the data to center and scale the predictors. We use random forest on the second training set (training2).
 ```{r rf, echo=FALSE, message=FALSE,warning=FALSE,cache=TRUE}
-rfFit <- train(classe ~., method="rf", prox=TRUE, data=training2)
+rfFit <- train(classe ~., method="rf", prox=TRUE, preProcess=c("center", "scale"), trControl=trainControl(method = "cv", number = 4), data=training2)
 rfPredict <- predict(rfFit,newdata=testing2)
 cmRF <- confusionMatrix(testing2$classe,rfPredict)
 cmRF$overall[1]  # print out overall accuracy
 table(rfPredict,testing2$classe)
 ```
-We use random forest on the second training set (training2) and see that this gives us a `r 100*cmRF$overall[1]`% overall accuracy. Clearly this is much better than the tree method.
+This gives us a `r 100*cmRF$overall[1]`% overall accuracy. Clearly this is much better than the tree method.
 
+### Boosting
+
+We now use the boosting method on training set 3 (training3) combined with pre-processing and cross-validation.
 ```{r boost, echo=FALSE, message=FALSE,warning=FALSE,cache=TRUE}
-boostFit <- train(classe ~., method="gbm", data=training3, verbose=FALSE)
+boostFit <- train(classe ~., method="gbm", data=training3, verbose=FALSE,preProcess=c("center", "scale"), trControl=trainControl(method = "cv", number = 4))
 boostPredict <- predict(boostFit,newdata=testing3)
 cmBoost <- confusionMatrix(testing3$classe,boostPredict)
 cmBoost$overall[1]  # print out overall accuracy
 table(boostPredict,testing3$classe)
 ```
-Boosting on training set 3 (training3) gives us a  `r 100*cmBoost$overall[1]`% overall accuracy.
+Boosting gives us a `r 100*cmBoost$overall[1]`% overall accuracy.
 
+## Linear discriminant analysis
 
+Lastly, we try linear discriminant analysis on training set 4 (training4) again with pre-processing and cross-validation.
 ```{r lda, echo=FALSE, message=FALSE,warning=FALSE,cache=TRUE}
 ldaFit <- train(classe ~., method="lda", data=training4)
 ldaPredict <- predict(ldaFit,newdata=testing4)
@@ -115,32 +123,174 @@ cmLDA <- confusionMatrix(testing4$classe,ldaPredict)
 cmLDA$overall[1]  # print out overall accuracy
 table(ldaPredict,testing4$classe)
 ```
-Lastly, we try linear discrimant analysis on training set 4 (training4) and get a `r 100*cmLDA$overall[1]`% overall accuracy.
+LDA gives us a `r 100*cmLDA$overall[1]`% overall accuracy.
 
 ## Choose a model, make predictions, estimate error
 
-Based on the results we achieved for the different models, we choose to use the random forest method to predict our results.  We will also use the boosting as a second choice to see how it differs on the test data from the random forest method.  
-```{r overall, include=FALSE, message=FALSE,warning=FALSE,cache=TRUE}
-#rfAFit <- train(classe ~., method="rf", prox=TRUE, data=training)
-#rfAPredict <- predict(rfAFit,newdata=testing)
-#cmRFA <- confusionMatrix(testing$classe,rfAPredict)
-#cmRFA$overall[1]  # print out overall accuracy
-#table(rfAPredict,testing$classe)
-#boostAFit <- train(classe ~., method="gbm", data=training, verbose=FALSE)
-#boostAPredict <- predict(boosAtFit,newdata=testing)
-#cmABoost <- confusionMatrix(testing$classe,boostAPredict)
-#cmABoost$overall[1]  # print out overall accuracy
-#table(boostAPredict,testing$classe)
+Based on the results we achieved for the different models, we choose to use the random forest method to predict our results.  We will also use the boosting as a second choice to see how it differs on the test data from the random forest method.
+We apply the random forest method to each of our training and testing datasets and average the error rates to get an estimate of the out-of-sample error.  
+
+```{r overall, echo=FALSE, message=FALSE,warning=FALSE,cache=TRUE}
+rf1Fit <- train(classe ~., method="rf", prox=TRUE, preProcess=c("center", "scale"), trControl=trainControl(method = "cv", number = 4), data=training1)
+rf1Predict <- predict(rfFit,newdata=testing1)
+cm1RF <- confusionMatrix(testing1$classe,rf1Predict)
+acc1 <- cm1RF$overall[1]  # print out overall accuracy
+rf3Fit <- train(classe ~., method="rf", prox=TRUE, preProcess=c("center", "scale"), trControl=trainControl(method = "cv", number = 4), data=training3)
+rf3Predict <- predict(rfFit,newdata=testing3)
+cm3RF <- confusionMatrix(testing3$classe,rf3Predict)
+acc3 <- cm3RF$overall[1]  # print out overall accuracy
+rf4Fit <- train(classe ~., method="rf", prox=TRUE, preProcess=c("center", "scale"), trControl=trainControl(method = "cv", number = 4), data=training4)
+rf4Predict <- predict(rfFit,newdata=testing4)
+cm4RF <- confusionMatrix(testing4$classe,rf4Predict)
+acc4 <- cm4RF$overall[1]  # print out overall accuracy
 ```
 
-Based on the above, we estimate our out-of-sample error to be 1 - the accuracy of the random forest method or `r  1-cmRF$overall[1]`. 
+Based on the above, we estimate our out-of-sample error to be 1 - the average accuracy of the random forest method or `r  1-(cmRF$overall[1]+acc1+acc3+acc4)/4`. 
 
-Where do the two models produce different responses? What are the predictions for our test dataset from the two models?
+Where do the two models produce different responses? What are the predictions for our test dataset from the two models?  We list the predictions for the application of each of the 4 random forest fits to the testing set followed by the boosting fit applied to the testing set.
 
 ```{r diff,echo=FALSE, message=FALSE,warning=FALSE,cache=TRUE}
-table(boostPredict,rfPredict)
+table(boostPredict,rf3Predict)
+rf1Predictions <- predict(rf1Fit, newdata=testingAll)
 rfPredictions <- predict(rfFit, newdata=testingAll)
-rfPredictions
+rf3Predictions <- predict(rf3Fit, newdata=testingAll)
+rf4Predictions <- predict(rf4Fit, newdata=testingAll)
+
 boostPredictions <- predict(boostFit, newdata=testingAll)
+rf1Predictions
+rfPredictions
+rf3Predictions
+rf4Predictions
+boostPredictions
+```
+
+## Appendix
+
+Here is the code that was used in the document.
+ 
+```{r libraryAndDataLoad2, eval=FALSE, message=FALSE, warning=FALSE, cache=TRUE}
+# load libraries and data
+library(caret)
+library(randomForest)
+library(rattle)
+library(rpart.plot)
+# library(gbm)
+
+url_training <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+url_testing <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+download.file(url=url_training, destfile="../pml-training.csv")
+download.file(url=url_training, destfile="../pml_testing.csv")
+
+# read in, replacing empty cells with NA
+trainingAll <- read.csv("../pml-training.csv",na.strings=c("NA",""), header=TRUE)
+testingAll <- read.csv("../pml-testing.csv",na.strings=c("NA",""), header=TRUE)
+
+# get rid of first 7 columns (nothing important for prediction) and columns with nothing or NA in them
+trainingAll <- trainingAll[,-1:-7]
+testingAll <- testingAll[,-1:-7]
+
+# find total number of training observations
+Ntot <- dim(trainingAll)[[1]] 
+# find indices of columns with over half NA values
+wntg<-which(colSums(is.na(trainingAll))>Ntot/2)
+trainingAll <- trainingAll[,-c(wntg)]
+testingAll <- testingAll[,-c(wntg)]
+
+# check to see if there are any zero covariates
+nsv <- nearZeroVar(trainingAll,saveMetrics=TRUE)
+nsv
+
+# split training data into 4 randomly sampled datasets
+set.seed(1234)
+folds <- createFolds(trainingAll$classe,k=4)
+data1 <- trainingAll[folds$Fold1,]
+data2 <- trainingAll[folds$Fold2,]
+data3 <- trainingAll[folds$Fold3,]
+data4 <- trainingAll[folds$Fold4,]
+set.seed(1234)
+inTrain1 <- createDataPartition(y=data1$classe, p = 0.7, list=FALSE)
+training1 <- data1[inTrain1,]; testing1 <- data1[-inTrain1,]
+set.seed(1234)
+inTrain2 <- createDataPartition(y=data2$classe, p = 0.7, list=FALSE)
+training2 <- data1[inTrain2,]; testing2 <- data2[-inTrain2,]
+set.seed(1234)
+inTrain3 <- createDataPartition(y=data3$classe, p = 0.7, list=FALSE)
+training3 <- data3[inTrain3,]; testing3 <- data1[-inTrain3,]
+set.seed(1234)
+inTrain4 <- createDataPartition(y=data4$classe, p = 0.7, list=FALSE)
+training4 <- data4[inTrain4,]; testing4 <- data4[-inTrain4,]
+# break overall dataset into training and testing sets
+
+inTrain <- createDataPartition(y=trainingAll$classe, p = 0.7, list=FALSE)
+training <- trainingAll[inTrain,]; testing <- trainingAll[-inTrain,]
+```
+
+```{r tree2, eval=FALSE, message=FALSE,warning=FALSE,cache=TRUE}
+# Classification Tree
+treeFit <- train(classe ~., method="rpart", data=training1)
+fancyRpartPlot(treeFit$finalModel)
+treePredict <- predict(treeFit,newdata=testing1)
+cmTree <- confusionMatrix(testing1$classe,treePredict)
+cmTree$overall[1]  # print out overall accuracy
+table(treePredict,testing1$classe)
+```
+
+```{r rf2, eval=FALSE, message=FALSE,warning=FALSE,cache=TRUE}
+# Random Forest
+rfFit <- train(classe ~., method="rf", prox=TRUE, preProcess=c("center", "scale"), trControl=trainControl(method = "cv", number = 4), data=training2)
+rfPredict <- predict(rfFit,newdata=testing2)
+cmRF <- confusionMatrix(testing2$classe,rfPredict)
+cmRF$overall[1]  # print out overall accuracy
+table(rfPredict,testing2$classe)
+```
+
+```{r boost2, eval=FALSE, message=FALSE,warning=FALSE,cache=TRUE}
+# Boosting
+boostFit <- train(classe ~., method="gbm", data=training3, verbose=FALSE,preProcess=c("center", "scale"), trControl=trainControl(method = "cv", number = 4))
+boostPredict <- predict(boostFit,newdata=testing3)
+cmBoost <- confusionMatrix(testing3$classe,boostPredict)
+cmBoost$overall[1]  # print out overall accuracy
+table(boostPredict,testing3$classe)
+```
+
+```{r lda2, eval=FALSE, message=FALSE,warning=FALSE,cache=TRUE}
+# Linear Discriminant Analysis
+ldaFit <- train(classe ~., method="lda", data=training4)
+ldaPredict <- predict(ldaFit,newdata=testing4)
+cmLDA <- confusionMatrix(testing4$classe,ldaPredict)
+cmLDA$overall[1]  # print out overall accuracy
+table(ldaPredict,testing4$classe)
+```
+
+```{r overall2, eval=FALSE, message=FALSE,warning=FALSE,cache=TRUE}
+# Random Forest applied to other training sets
+rf1Fit <- train(classe ~., method="rf", prox=TRUE, preProcess=c("center", "scale"), trControl=trainControl(method = "cv", number = 4), data=training1)
+rf1Predict <- predict(rfFit,newdata=testing1)
+cm1RF <- confusionMatrix(testing1$classe,rf1Predict)
+acc1 <- cm1RF$overall[1]  # print out overall accuracy
+rf3Fit <- train(classe ~., method="rf", prox=TRUE, preProcess=c("center", "scale"), trControl=trainControl(method = "cv", number = 4), data=training3)
+rf3Predict <- predict(rfFit,newdata=testing3)
+cm3RF <- confusionMatrix(testing3$classe,rf3Predict)
+acc3 <- cm3RF$overall[1]  # print out overall accuracy
+rf4Fit <- train(classe ~., method="rf", prox=TRUE, preProcess=c("center", "scale"), trControl=trainControl(method = "cv", number = 4), data=training4)
+rf4Predict <- predict(rfFit,newdata=testing4)
+cm4RF <- confusionMatrix(testing4$classe,rf4Predict)
+acc4 <- cm4RF$overall[1]  # print out overall accuracy
+```
+
+```{r diff2,eval=FALSE, message=FALSE,warning=FALSE,cache=TRUE}
+# Compare boosting and random forest results on their training set 3
+table(boostPredict,rf3Predict)
+# predictions of random forest models on testing data
+rf1Predictions <- predict(rf1Fit, newdata=testingAll)
+rfPredictions <- predict(rfFit, newdata=testingAll)
+rf3Predictions <- predict(rf3Fit, newdata=testingAll)
+rf4Predictions <- predict(rf4Fit, newdata=testingAll)
+# predictions of boosting algorithm on testing data
+boostPredictions <- predict(boostFit, newdata=testingAll)
+rf1Predictions
+rfPredictions
+rf3Predictions
+rf4Predictions
 boostPredictions
 ```
