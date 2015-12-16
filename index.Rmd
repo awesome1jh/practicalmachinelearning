@@ -7,16 +7,140 @@ output:
     fig_caption: yes
     keep_md: yes
 ---
+Can we predict whether or not someone has lifted weights correctly using data from accelerometers on the belt, forearm, arm and dumbbell?  We use data gathered on 6 participants who were asked to perform barbell lifts correctly and incorrectly in 5 different ways.  The results of their exercises were recorded and will be used to predict whether or not other lifting is done correctly or not.  If incorrect, the basic type of incorrect behavior will be predicted.  
 
-This is the beginning of my summary.  The document should contain no more than 5 figures and 2000 words.
-```{r}
-summary(cars)
+More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+## Load and pre-process data
+
+We load the libraries we need and download the datasets from the internet.  After reading in the datasets, we eliminate the first 7 columns since they are not applicable to predicting the result. We also eliminate all columns that are mostly NA or empty. We then scale all columns except the last one ( classe which is what we want to predict).
+
+We analyze the covariates to see if we any have near zero variance.  They do not, so there is no need to remove columns on that basis. We then divide the training set into 4 folds (mutually exclusive random subsets of the observations).  Each fold is then divided into a training dataset and a testing dataset. 
+```{r libraryAndDataLoad,  echo=FALSE, message=FALSE, warning=FALSE, cache=TRUE}
+library(caret)
+library(randomForest)
+library(rattle)
+# library(gbm)
+
+url_training <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+url_testing <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+# download.file(url=url_training, destfile="../pml-training.csv")
+# download.file(url=url_training, destfile="../pml_testing.csv")
+
+# read in, replacing empty cells with NA
+trainingAll <- read.csv("../pml-training.csv",na.strings=c("NA",""), header=TRUE)
+testingAll <- read.csv("../pml-testing.csv",na.strings=c("NA",""), header=TRUE)
+
+# get rid of first 7 columns (nothing important for prediction) and columns with nothing or NA in them
+trainingAll <- trainingAll[,-1:-7]
+testingAll <- testingAll[,-1:-7]
+
+# find total number of training observations
+Ntot <- dim(trainingAll)[[1]] 
+# find indices of columns with over half NA values
+wntg<-which(colSums(is.na(trainingAll))>Ntot/2)
+trainingAll <- trainingAll[,-c(wntg)]
+testingAll <- testingAll[,-c(wntg)]
+
+# check to see if there are any zero covariates
+nsv <- nearZeroVar(trainingAll,saveMetrics=TRUE)
+nsv
+# scale the data in the training and testing datasets
+trainingAll[,-53] <- scale(trainingAll[,-53])
+testingAll[,-53] <- scale(testingAll[,-53])
+
+# split training data into 4 randomly sampled datasets
+set.seed(1234)
+folds <- createFolds(trainingAll$classe,k=4)
+data1 <- trainingAll[folds$Fold1,]
+data2 <- trainingAll[folds$Fold2,]
+data3 <- trainingAll[folds$Fold3,]
+data4 <- trainingAll[folds$Fold4,]
+set.seed(1234)
+inTrain1 <- createDataPartition(y=data1$classe, p = 0.7, list=FALSE)
+training1 <- data1[inTrain1,]; testing1 <- data1[-inTrain1,]
+set.seed(1234)
+inTrain2 <- createDataPartition(y=data2$classe, p = 0.7, list=FALSE)
+training2 <- data1[inTrain2,]; testing2 <- data2[-inTrain2,]
+set.seed(1234)
+inTrain3 <- createDataPartition(y=data3$classe, p = 0.7, list=FALSE)
+training3 <- data3[inTrain3,]; testing3 <- data1[-inTrain3,]
+set.seed(1234)
+inTrain4 <- createDataPartition(y=data4$classe, p = 0.7, list=FALSE)
+training4 <- data4[inTrain4,]; testing4 <- data4[-inTrain4,]
+# break overall dataset into training and testing sets
+
+inTrain <- createDataPartition(y=trainingAll$classe, p = 0.7, list=FALSE)
+training <- trainingAll[inTrain,]; testing <- trainingAll[-inTrain,]
 ```
 
-You can also embed plots, for example:
+## Examine different methods to check effectiveness
 
-```{r, echo=FALSE}
-plot(cars)
+First, we predict with trees on the first training set (training1) and look at the tree plot.  
+
+```{r tree, echo=FALSE, message=FALSE,warning=FALSE,cache=TRUE}
+treeFit <- train(classe ~., method="rpart", data=training1)
+fancyRpartPlot(treeFit$finalModel)
+treePredict <- predict(treeFit,newdata=testing1)
+cmTree <- confusionMatrix(testing1$classe,treePredict)
+cmTree$overall[1]  # print out overall accuracy
+table(treePredict,testing1$classe)
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+We see that this method only gave us a `r 100*cmTree$overall[1]`% overall accuracy.
+
+```{r rf, echo=FALSE, message=FALSE,warning=FALSE,cache=TRUE}
+rfFit <- train(classe ~., method="rf", prox=TRUE, data=training2)
+rfPredict <- predict(rfFit,newdata=testing2)
+cmRF <- confusionMatrix(testing2$classe,rfPredict)
+cmRF$overall[1]  # print out overall accuracy
+table(rfPredict,testing2$classe)
+```
+We use random forest on the second training set (training2) and see that this gives us a `r 100*cmRF$overall[1]`% overall accuracy. Clearly this is much better than the tree method.
+
+```{r boost, echo=FALSE, message=FALSE,warning=FALSE,cache=TRUE}
+boostFit <- train(classe ~., method="gbm", data=training3, verbose=FALSE)
+boostPredict <- predict(boostFit,newdata=testing3)
+cmBoost <- confusionMatrix(testing3$classe,boostPredict)
+cmBoost$overall[1]  # print out overall accuracy
+table(boostPredict,testing3$classe)
+```
+Boosting on training set 3 (training3) gives us a  `r 100*cmBoost$overall[1]`% overall accuracy.
+
+
+```{r lda, echo=FALSE, message=FALSE,warning=FALSE,cache=TRUE}
+ldaFit <- train(classe ~., method="lda", data=training4)
+ldaPredict <- predict(ldaFit,newdata=testing4)
+cmLDA <- confusionMatrix(testing4$classe,ldaPredict)
+cmLDA$overall[1]  # print out overall accuracy
+table(ldaPredict,testing4$classe)
+```
+Lastly, we try linear discrimant analysis on training set 4 (training4) and get a `r 100*cmLDA$overall[1]`% overall accuracy.
+
+## Choose a model, make predictions, estimate error
+
+Based on the results we achieved for the different models, we choose to use the random forest method to predict our results.  We will also use the boosting as a second choice to see how it differs on the test data from the random forest method.  
+```{r overall, include=FALSE, message=FALSE,warning=FALSE,cache=TRUE}
+#rfAFit <- train(classe ~., method="rf", prox=TRUE, data=training)
+#rfAPredict <- predict(rfAFit,newdata=testing)
+#cmRFA <- confusionMatrix(testing$classe,rfAPredict)
+#cmRFA$overall[1]  # print out overall accuracy
+#table(rfAPredict,testing$classe)
+#boostAFit <- train(classe ~., method="gbm", data=training, verbose=FALSE)
+#boostAPredict <- predict(boosAtFit,newdata=testing)
+#cmABoost <- confusionMatrix(testing$classe,boostAPredict)
+#cmABoost$overall[1]  # print out overall accuracy
+#table(boostAPredict,testing$classe)
+```
+
+Based on the above, we estimate our out-of-sample error to be 1 - the accuracy of the random forest method or `r  1-cmRF$overall[1]`. 
+
+Where do the two models produce different responses? What are the predictions for our test dataset from the two models?
+
+```{r diff,echo=FALSE, message=FALSE,warning=FALSE,cache=TRUE}
+table(boostPredict,rfPredict)
+rfPredictions <- predict(rfFit, newdata=testingAll)
+rfPredictions
+boostPredictions <- predict(boostFit, newdata=testingAll)
+boostPredictions
+```
